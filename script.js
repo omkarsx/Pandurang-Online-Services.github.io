@@ -3,8 +3,13 @@ const navbar = document.getElementById('navbar');
 const hamburger = document.getElementById('hamburger');
 const navLinks = document.getElementById('navLinks');
 const mobileMenuBackdrop = document.getElementById('mobileMenuBackdrop');
+const reduceMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+const prefersReducedMotion = reduceMotionQuery.matches;
+
+document.body.classList.add('motion-ready');
 
 hamburger.setAttribute('aria-expanded', 'false');
+navLinks.setAttribute('aria-hidden', String(window.matchMedia('(max-width: 768px)').matches));
 
 window.addEventListener('scroll', () => {
   navbar.classList.toggle('scrolled', window.scrollY > 40);
@@ -12,10 +17,20 @@ window.addEventListener('scroll', () => {
 });
 
 function setMobileMenu(open) {
+  const isMobileMenu = window.matchMedia('(max-width: 768px)').matches;
   navLinks.classList.toggle('open', open);
   hamburger.classList.toggle('open', open);
   document.body.classList.toggle('mobile-menu-open', open);
   hamburger.setAttribute('aria-expanded', String(open));
+  hamburger.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
+  navLinks.setAttribute('aria-hidden', String(isMobileMenu && !open));
+
+  if (open) {
+    requestAnimationFrame(() => {
+      const activeLink = navLinks.querySelector('.nav-link.active') || navLinks.querySelector('.nav-link');
+      if (activeLink && isMobileMenu) activeLink.focus({ preventScroll: true });
+    });
+  }
 }
 
 hamburger.addEventListener('click', () => {
@@ -31,6 +46,13 @@ navLinks.querySelectorAll('.nav-link').forEach(link => {
 if (mobileMenuBackdrop) {
   mobileMenuBackdrop.addEventListener('click', () => setMobileMenu(false));
 }
+
+window.addEventListener('resize', () => {
+  if (window.innerWidth > 768 && navLinks.classList.contains('open')) {
+    setMobileMenu(false);
+  }
+  navLinks.setAttribute('aria-hidden', String(window.innerWidth <= 768 && !navLinks.classList.contains('open')));
+});
 
 function updateActiveLink() {
   const sections = ['home','services','why-us','about','process','testimonials','faq','contact'];
@@ -48,13 +70,14 @@ function updateActiveLink() {
 (function createParticles() {
   const container = document.getElementById('particles');
   if (!container) return;
-  for (let i = 0; i < 18; i++) {
+  const particleCount = prefersReducedMotion ? 6 : 18;
+  for (let i = 0; i < particleCount; i++) {
     const p = document.createElement('div');
     p.style.cssText = `position:absolute;border-radius:50%;pointer-events:none;
       width:${4 + Math.random() * 8}px;height:${4 + Math.random() * 8}px;
       background:${Math.random() > 0.5 ? 'rgba(13,27,75,0.12)' : 'rgba(232,100,10,0.15)'};
       left:${Math.random() * 100}%;top:${Math.random() * 100}%;
-      animation:float ${4 + Math.random() * 6}s ease-in-out ${Math.random() * 4}s infinite`;
+      animation:${prefersReducedMotion ? 'none' : `float ${4 + Math.random() * 6}s ease-in-out ${Math.random() * 4}s infinite`}`;
     container.appendChild(p);
   }
 })();
@@ -74,23 +97,64 @@ function animateCounters() {
   });
 }
 
-// ---- SCROLL REVEAL ----
-const revealObserver = new IntersectionObserver((entries) => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      const el = entry.target;
-      el.classList.add('visible');
-      // delay for child items
-      el.querySelectorAll('[data-delay]').forEach(child => {
-        child.style.transitionDelay = child.dataset.delay + 'ms';
-      });
-    }
-  });
-}, { threshold: 0.15 });
+// ---- MOTION REVEAL SYSTEM ----
+function getMotionTargets() {
+  const groups = [
+    { selector: '.section-header', delayStep: 40 },
+    { selector: '.service-card[data-service]', delayStep: 70 },
+    { selector: '.feature-card', delayStep: 80 },
+    { selector: '.about-visual, .about-content', delayStep: 90 },
+    { selector: '.process-step', delayStep: 85 },
+    { selector: '.testimonial-card', delayStep: 70 },
+    { selector: '.faq-item', delayStep: 55 },
+    { selector: '.contact-info > *, .contact-form-wrap', delayStep: 65 },
+    { selector: '.footer-grid > div, .footer-bottom', delayStep: 55 },
+    { selector: '.reveal', delayStep: 60 }
+  ];
 
-document.querySelectorAll('.reveal, .feature-card, .process-step, .about-content').forEach(el => {
-  revealObserver.observe(el);
-});
+  const seen = new Set();
+  const targets = [];
+
+  groups.forEach(group => {
+    document.querySelectorAll(group.selector).forEach((el, index) => {
+      if (seen.has(el)) return;
+      seen.add(el);
+      el.classList.add('motion-reveal');
+      el.style.setProperty('--reveal-delay', prefersReducedMotion ? '0ms' : `${Math.min(index, 8) * group.delayStep}ms`);
+      targets.push(el);
+    });
+  });
+
+  return targets;
+}
+
+function initMotionReveal() {
+  const targets = getMotionTargets();
+
+  if (prefersReducedMotion || !('IntersectionObserver' in window)) {
+    targets.forEach(el => el.classList.add('is-visible', 'visible'));
+    return;
+  }
+
+  const observer = new IntersectionObserver((entries, revealObserver) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const el = entry.target;
+      el.classList.add('is-visible', 'visible');
+      el.querySelectorAll('[data-delay]').forEach(child => {
+        child.style.transitionDelay = `${child.dataset.delay}ms`;
+      });
+      revealObserver.unobserve(el);
+    });
+  }, {
+    threshold: 0.12,
+    rootMargin: '0px 0px -8% 0px'
+  });
+
+  targets.forEach(el => observer.observe(el));
+}
+
+initMotionReveal();
 
 // ---- HERO COUNTER TRIGGER ----
 const heroObserver = new IntersectionObserver((entries) => {
@@ -101,27 +165,6 @@ const heroObserver = new IntersectionObserver((entries) => {
 }, { threshold: 0.4 });
 const heroSection = document.getElementById('home');
 if (heroSection) heroObserver.observe(heroSection);
-
-// ---- SERVICE CARDS STAGGERED ----
-const serviceObserver = new IntersectionObserver((entries) => {
-  if (entries[0].isIntersecting) {
-    document.querySelectorAll('.service-card').forEach((card, i) => {
-      setTimeout(() => {
-        card.style.opacity = '1';
-        card.style.transform = 'translateY(0)';
-      }, i * 80);
-    });
-    serviceObserver.disconnect();
-  }
-}, { threshold: 0.1 });
-
-document.querySelectorAll('.service-card').forEach(card => {
-  card.style.opacity = '0';
-  card.style.transform = 'translateY(30px)';
-  card.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
-});
-const servicesSection = document.getElementById('services');
-if (servicesSection) serviceObserver.observe(servicesSection);
 
 // ---- INTERACTIVE SERVICE REQUEST SYSTEM ----
 const SERVICE_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbznusXhdPqE32uSjbIOR31BqsyZBquSG9WitcBTf1QCXTQ5hUk4fHMfU9zq7lHnIanYfQ/exec';
@@ -481,7 +524,8 @@ const UI_TEXT = {
       statuses: {
         submitting: 'Submitting your request securely...',
         success: 'Request submitted successfully. Our team will contact you shortly.',
-        error: 'Unable to submit right now. Please check your internet connection and try again.'
+        error: 'Unable to submit right now. Please check your internet connection and try again.',
+        validation: 'Please complete the highlighted fields before submitting.'
       },
       errors: {
         required: 'This field is required.',
@@ -730,7 +774,8 @@ const UI_TEXT = {
       statuses: {
         submitting: 'तुमची विनंती सुरक्षितपणे सबमिट करत आहे...',
         success: 'विनंती यशस्वीपणे सबमिट झाली. आमची टीम लवकरच संपर्क करेल.',
-        error: 'सध्या सबमिट करता आले नाही. कृपया इंटरनेट कनेक्शन तपासा आणि पुन्हा प्रयत्न करा.'
+        error: 'सध्या सबमिट करता आले नाही. कृपया इंटरनेट कनेक्शन तपासा आणि पुन्हा प्रयत्न करा.',
+        validation: 'सबमिट करण्यापूर्वी हायलाइट केलेली फील्ड पूर्ण करा.'
       },
       errors: {
         required: 'हे फील्ड आवश्यक आहे.',
@@ -948,6 +993,66 @@ if (languageToggle) {
   });
 }
 
+// ---- PREMIUM TOAST NOTIFICATIONS ----
+const TOAST_ICONS = {
+  success: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+  error: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.7 2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z"/></svg>',
+  loading: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>'
+};
+
+function getToastContainer() {
+  let container = document.getElementById('toastContainer');
+
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    container.setAttribute('aria-live', 'polite');
+    container.setAttribute('aria-atomic', 'true');
+    document.body.appendChild(container);
+  }
+
+  return container;
+}
+
+function showToast(type, message, options = {}) {
+  if (!message) return null;
+
+  const container = getToastContainer();
+  const toast = document.createElement('div');
+  const duration = Number.isFinite(options.duration) ? options.duration : 4200;
+  let closeTimer;
+
+  toast.className = `toast ${type}`;
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  toast.innerHTML = `
+    <span class="toast-icon">${TOAST_ICONS[type] || TOAST_ICONS.success}</span>
+    <span class="toast-message"></span>
+    <button class="toast-close" type="button" aria-label="Close notification">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+    </button>
+  `;
+
+  toast.querySelector('.toast-message').textContent = message;
+  container.appendChild(toast);
+
+  const closeToast = () => {
+    window.clearTimeout(closeTimer);
+    toast.classList.remove('show');
+    toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+    window.setTimeout(() => toast.remove(), 360);
+  };
+
+  toast.querySelector('.toast-close').addEventListener('click', closeToast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+
+  if (duration > 0) {
+    closeTimer = window.setTimeout(closeToast, duration);
+  }
+
+  return { element: toast, close: closeToast };
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -1117,6 +1222,9 @@ function setServiceStatus(type, message) {
   if (!status) return;
   status.className = `form-status ${type} show`;
   status.textContent = message;
+  status.classList.remove('status-enter');
+  void status.offsetWidth;
+  status.classList.add('status-enter');
 }
 
 function clearServiceStatus() {
@@ -1216,6 +1324,7 @@ function handleSelectedFile(file, input) {
     });
     input.value = '';
     markServiceFieldInvalid(input, i18n('form.errors.fileType'));
+    showToast('error', i18n('form.errors.fileType'));
     return;
   }
 
@@ -1226,6 +1335,7 @@ function handleSelectedFile(file, input) {
     });
     input.value = '';
     markServiceFieldInvalid(input, i18n('form.errors.fileSize'));
+    showToast('error', i18n('form.errors.fileSize'));
     return;
   }
 
@@ -1259,6 +1369,7 @@ function handleSelectedFile(file, input) {
       console.error('[Service Request] File preparation failed', error);
       input.value = '';
       markServiceFieldInvalid(input, error.message);
+      showToast('error', error.message);
     })
     .finally(() => {
       setServiceSubmitting(false);
@@ -1456,6 +1567,7 @@ async function handleServiceSubmit(event) {
 
   if (!validateServiceForm()) {
     console.warn('[Service Request] Validation failed');
+    showToast('error', i18n('form.statuses.validation'));
     return;
   }
 
@@ -1475,15 +1587,17 @@ async function handleServiceSubmit(event) {
     const payload = buildServicePayload(values);
 
     setServiceSubmitting(true, i18n('form.submitting'));
-    setServiceStatus('success', i18n('form.statuses.submitting'));
+    setServiceStatus('loading', i18n('form.statuses.submitting'));
     const response = await submitServiceRequest(payload);
     console.log('[Service Request] Submission completed', response);
     serviceRequestForm.reset();
     resetUploadState();
     setServiceStatus('success', i18n('form.statuses.success'));
+    showToast('success', i18n('form.statuses.success'));
   } catch (error) {
     console.error('[Service Request] Submission failed', error);
     setServiceStatus('error', i18n('form.statuses.error'));
+    showToast('error', i18n('form.statuses.error'));
   } finally {
     isServiceSubmissionInProgress = false;
     setServiceSubmitting(false);
@@ -1586,6 +1700,9 @@ function setContactStatus(type, message) {
   if (!contactStatus) return;
   contactStatus.className = `form-success ${type}`;
   contactStatus.textContent = message;
+  contactStatus.classList.remove('status-enter');
+  void contactStatus.offsetWidth;
+  contactStatus.classList.add('status-enter');
 }
 
 function clearContactStatus() {
@@ -1683,6 +1800,7 @@ if (contactForm) {
     clearContactStatus();
 
     if (!validateContactForm()) {
+      showToast('error', contactStatus?.textContent || i18n('contact.errors.submit'));
       return;
     }
 
@@ -1696,9 +1814,11 @@ if (contactForm) {
       console.log('[Contact Form] Submission completed', response);
       contactForm.reset();
       setContactStatus('success', i18n('contact.success'));
+      showToast('success', i18n('contact.success'));
     } catch (error) {
       console.error('[Contact Form] Submission failed', error);
       setContactStatus('error', i18n('contact.errors.submit'));
+      showToast('error', i18n('contact.errors.submit'));
     } finally {
       isContactSubmissionInProgress = false;
       setContactSubmitting(false);
